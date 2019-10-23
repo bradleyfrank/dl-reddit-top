@@ -31,7 +31,7 @@ timeframe = month
 
 The `.credentials` file should look like this:
 ```
-[credentials1]
+[credentials]
 address = <my email address>
 password = <my password>
 ```
