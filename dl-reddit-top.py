@@ -19,9 +19,11 @@ from urllib.error import URLError
 
 REDDIT_URL = 'https://www.reddit.com'
 
-def is_url_image(url):    
-    mimetype,_ = mimetypes.guess_type(url)
+
+def is_url_image(url):
+    mimetype, _ = mimetypes.guess_type(url)
     return (mimetype and mimetype.startswith('image'))
+
 
 def make_filename(url, name, out_dir):
     # get the short month name (e.g. Jan, Feb) and year (e.g. 2019, 2020)
@@ -29,7 +31,7 @@ def make_filename(url, name, out_dir):
     year = datetime.datetime.now().strftime('%y')
     date = month + year
     # get the file extension of the image (e.g. png, jpg)
-    _,ext = os.path.splitext(url)
+    _, ext = os.path.splitext(url)
     # remove spaces, special characters, etc.
     name = re.sub(r"[^\w\s]", '', name)
     name = re.sub(r"\s+", '-', name)
@@ -37,6 +39,7 @@ def make_filename(url, name, out_dir):
     name = name[:75] if len(name) > 75 else name
     # return completed filename
     return out_dir + '/' + date + '-' + name + ext
+
 
 def download_image(url, title, download_dir):
     filename = make_filename(url, title, download_dir)
@@ -66,12 +69,14 @@ def download_image(url, title, download_dir):
 
     return True
 
+
 def get_top_posts(subreddit, timeframe, download_dir):
     url = REDDIT_URL + '/r/' + subreddit + '/top/.json?t=' + timeframe
 
     try:
         req = urllib.request.Request(url)
-        req.add_header('User-Agent', 'Mozilla/4.0 (compatible; MSIE 7.0; Windows NT 6.0)')
+        req.add_header('User-Agent', 'Mozilla/4.0 (compatible; MSIE 7.0; \
+            Windows NT 6.0)')
         response = urllib.request.urlopen(req)
     except HTTPError as e:
         print(subreddit + ': could not download subreddit data.')
@@ -100,13 +105,15 @@ def get_top_posts(subreddit, timeframe, download_dir):
 
     return True
 
+
 def send_email(sender, recipient, subject, body, password):
     s = smtplib.SMTP('smtp.gmail.com', 587)
     message = 'Subject: {}\n\n{}'.format(subject, body)
     s.starttls()
     s.login(sender, password)
-    s.sendmail(sender,recipient,message)
+    s.sendmail(sender, recipient, message)
     s.quit()
+
 
 class myLogger:
 
@@ -133,6 +140,7 @@ class myLogger:
         level = logging.getLevelName(lvl.upper())
         self.logger.log(level, msg)
 
+
 #
 # Setup argparser to accept two command line parameters:
 #   (1) -d or --debug to enable debugging
@@ -142,7 +150,8 @@ parser = argparse.ArgumentParser(
     description='Downloads top monthly posts from Reddit subreddits.')
 parser.add_argument('-d', '--debug', action='store_true',
                     help='enables debug messages')
-parser.add_argument('-c', '--config', help='Which config to use.', required=True)
+parser.add_argument('-c', '--config', help='Which config to use.',
+                    required=True)
 args = parser.parse_args()
 
 #
