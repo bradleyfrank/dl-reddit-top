@@ -18,12 +18,14 @@ Add two configuration files to the cloned repository.
 The `dl-reddit-top.conf` file looks like this:
 ```
 [FunnyAnimals]
+;send_email = [True|False]
 send_email = True
 email_address = myemail@domain.tld
 email_subject = New pictures downloaded!
 email_body = New top pictures have been downloaded, check them out!
 output_directory = /path/to/downloads/folder
 subreddits = AnimalsBeingBros,rarepuppers,AnimalsBeingDerps,dogswithjobs
+;timeframe = [year|month|week|day]
 timeframe = month
 ```
 

@@ -5,6 +5,7 @@ __author__ = 'Bradley Frank'
 import argparse
 import configparser
 import datetime
+import hashlib
 import json
 import logging
 import mimetypes
@@ -17,6 +18,7 @@ import urllib.request
 from urllib.error import HTTPError
 from urllib.error import URLError
 
+POSTS = {}
 REDDIT_URL = 'https://www.reddit.com'
 
 
@@ -25,85 +27,159 @@ def is_url_image(url):
     return (mimetype and mimetype.startswith('image'))
 
 
-def make_filename(url, name, out_dir):
-    # get the short month name (e.g. Jan, Feb) and year (e.g. 2019, 2020)
-    month = datetime.datetime.now().strftime('%b')
+def calculate_hash(image):
+    sha1 = hashlib.sha1(image)
+    hexdigest = sha1.hexdigest()
+    dlrlog.log('debug', 'Calculated sha1: ' + hexdigest)
+    return hexdigest
+
+
+def is_duplicate_hash(image_hash):
+    for _, metadata in POSTS.items():
+        if metadata['hash'] == image_hash:
+            dlrlog.log('warn', 'Found duplicate hash: ' + metadata['title'])
+            return True
+    else:
+        return False
+
+
+def is_duplicate_file(filename):
+    if os.path.isfile(filename):
+        dlrlog.log('warn', 'Found duplicate file: ' + filename)
+        return True
+    else:
+        return False
+
+
+def make_filename(url, name, subreddit, out_dir):
+    #
+    # Make the date prefix in the format "DDMMYY".
+    #
+    day = datetime.datetime.now().strftime('%d')
+    month = datetime.datetime.now().strftime('%m')
     year = datetime.datetime.now().strftime('%y')
-    date = month + year
-    # get the file extension of the image (e.g. png, jpg)
-    _, ext = os.path.splitext(url)
-    # remove spaces, special characters, etc.
+    date = day + month + year
+
+    #
+    # Remove spaces, special characters, etc. Then truncate filename to 50
+    # characters if too long.
+    #
     name = re.sub(r"[^\w\s]", '', name)
     name = re.sub(r"\s+", '-', name)
-    # shorten filename if too long
-    name = name[:75] if len(name) > 75 else name
-    # return completed filename
-    return out_dir + '/' + date + '-' + name + ext
+    name = name[:50] if len(name) > 50 else name
+    dlrlog.log('debug', 'Sanitized name: ' + name)
+
+    #
+    # Get the file extension of the image (e.g. png, jpg).
+    #
+    _, ext = os.path.splitext(url)
+
+    #
+    # Concatenate parts to make a filename.
+    #
+    filename = date + '_' + subreddit + '_' + name + ext
+    dlrlog.log('debug', 'Filename: ' + filename)
+
+    #
+    # Return full path to file.
+    #
+    return os.path.join(out_dir, filename)
 
 
-def download_image(url, title, download_dir):
-    filename = make_filename(url, title, download_dir)
-
-    if os.path.isfile(filename):
-        dlrlog.log('warn', 'Duplicate image: ' + title)
-        return True
-
+def download_image(url):
     try:
         response = urllib.request.urlopen(url)
     except HTTPError as e:
-        print('Could not download image ' + title)
-        dlrlog.log('error', e.code)
+        dlrlog.log('error', 'Could not download image: ' + e.code)
         return False
     except URLError as e:
-        print('Could not download image ' + title)
-        dlrlog.log('error', e.reason)
+        dlrlog.log('error', 'Could not download image: ' + e.reason)
         return False
 
+    return response.read()
+
+
+def save_image(filename, data):
     try:
         with open(filename, 'wb') as f:
-            shutil.copyfileobj(response, f)
+            f.write(data)
     except IOError as e:
-        print('Could not save image: ' + title)
         dlrlog.log('error', e)
         return False
 
     return True
 
 
-def get_top_posts(subreddit, timeframe, download_dir):
+def get_top_posts(subreddit, timeframe):
+    #
+    # Dictionary structure of subreddit posts:
+    #   postID: {
+    #       url:
+    #       title:
+    #       subreddit:
+    #       hash:
+    #   }
+    #
+    subreddit_posts = {}
+
+    #
+    # Create the full URL to the subreddit json feed.
+    #
     url = REDDIT_URL + '/r/' + subreddit + '/top/.json?t=' + timeframe
 
+    #
+    # Attempt to download the json feed.
+    #
     try:
         req = urllib.request.Request(url)
         req.add_header('User-Agent', 'Mozilla/4.0 (compatible; MSIE 7.0; \
             Windows NT 6.0)')
         response = urllib.request.urlopen(req)
     except HTTPError as e:
-        print(subreddit + ': could not download subreddit data.')
-        dlrlog.log('error', e.code)
+        dlrlog.log('error', 'Could not get ' + subreddit + ' data: ' + e.code)
         return False
     except URLError as e:
-        print(subreddit + ': could not download subreddit data.')
-        dlrlog.log('error', e.reason)
+        dlrlog.log('error', 'Could not get ' + subreddit + ' data: ' + e.reason)
         return False
 
+    #
+    # Convert the downloaded data into a readable json feed.
+    #
     data = response.readline().decode('utf-8')
     feed = json.loads(data)
 
+    #
+    # A proper subreddit json feed has a section named 'data'; look for that.
+    #
     if 'data' not in feed:
-        print(subreddit + ': could not find subreddit information.')
+        dlrlog.log('error', 'Error finding data in ' + subreddit + ' feed.')
         return False
     else:
-        dlrlog.log('info', subreddit + ': downloaded subreddit information.')
+        dlrlog.log('info', 'Downloaded ' + subreddit + ' feed.')
 
+    #
+    # Each child of the 'data' section is a post; loop through them to get
+    # the metadata. The post's unique ID will become the dictionary's key.
+    #
     for asset in feed['data']['children']:
-        content = asset['data']['url']
+        pid = asset['data']['id']
+        url = asset['data']['url']
         title = asset['data']['title']
-        if is_url_image(content):
-            dlrlog.log('info', 'Found post: ' + title)
-            download_image(content, title, download_dir)
 
-    return True
+        #
+        # Confirm the post is an image since that's the whole point of this.
+        #
+        if is_url_image(url):
+            dlrlog.log('info', 'Found image: ' + title)
+            subreddit_posts[pid] = {}
+            subreddit_posts[pid]['url'] = url
+            subreddit_posts[pid]['title'] = title
+            subreddit_posts[pid]['subreddit'] = subreddit
+            subreddit_posts[pid]['hash'] = ''
+        else:
+            dlrlog.log('debug', 'Skipping non-image: ' + title)
+
+    return subreddit_posts
 
 
 def send_email(sender, recipient, subject, body, password):
@@ -119,9 +195,9 @@ class myLogger:
 
     def __init__(self, debug=False):
         # Logging settings
-        self.logger = logging.getLogger('reposyncer')
+        self.logger = logging.getLogger('dl-reddit-top')
         if not debug:
-            log_level = 0
+            log_level = 100
         else:
             log_level = 10
         self.logger.setLevel(log_level)
@@ -169,53 +245,130 @@ __location__ = os.path.realpath(
     os.path.join(os.getcwd(), os.path.dirname(__file__)))
 
 #
-# Create a config parser instance and read in the config file, located
-# in the same directory as this script.
+# Ensure the user config file exists.
 #
-conf = configparser.ConfigParser()
-conf.read(os.path.join(__location__, 'dl-reddit-top.conf'))
+config_file = os.path.join(__location__, 'dl-reddit-top.conf')
+
+if not os.path.exists(config_file):
+    dlrlog.log('error', 'No config file found at ' + config_file + '.')
+    print('No config file found; please create ' + config_file + '.')
+    sys.exit()
 
 #
 # Read and apply settings from the config file.
 #
-CONFIG = args.config
+conf = configparser.ConfigParser()
+conf.read(config_file)
 
-if conf[CONFIG]['send_email'] == 'True':
+user_config = args.config
+
+if not conf.has_section(user_config):
+    dlrlog.log('error', 'No config section "' + user_config + '" was found.')
+    print('No config section "' + user_config + '" was found.')
+    sys.exit()
+
+if conf[user_config]['send_email'] == 'True':
     email_user = True
-    email_receiver = conf[CONFIG]['email_address']
-    email_subject = conf[CONFIG]['email_subject']
-    email_body = conf[CONFIG]['email_body']
+    email_receiver = conf[user_config]['email_address']
+    email_subject = conf[user_config]['email_subject']
+    email_body = conf[user_config]['email_body']
 else:
     email_user = False
 
-if conf.has_option(CONFIG, 'output_directory'):
-    output_directory = conf[CONFIG]['output_directory']
+if conf.has_option(user_config, 'output_directory'):
+    output_directory = conf[user_config]['output_directory']
 else:
     output_directory = __location__
 
-subreddits = conf[CONFIG]['subreddits'].split(',')
+subreddits = conf[user_config]['subreddits'].split(',')
 
-if conf.has_option(CONFIG, 'timeframe'):
-    timeframe = conf[CONFIG]['timeframe']
+if conf.has_option(user_config, 'timeframe'):
+    timeframe = conf[user_config]['timeframe']
 else:
     timeframe = 'month'
 
 #
 # Read in Gmail address and password for sending emails.
 #
-creds = configparser.ConfigParser()
-creds.read(os.path.join(__location__, '.credentials'))
-email_sender = creds['credentials']['address']
-email_passwd = creds['credentials']['password']
+if email_user:
+    creds = configparser.ConfigParser()
+    creds_config = os.path.join(__location__, '.credentials')
+
+    #
+    # Perform checks on the credentials config to ensure settings can be read.
+    #
+    if not os.path.exists(creds_config):
+        dlrlog.log('critical', 'No credentials found at ' + creds_config + '.')
+        print('No credentails file found; please create ' + creds_config + '.')
+        sys.exit()
+
+    if not conf.has_section('credentials'):
+        dlrlog.log('critical', 'No config section "credentials" was found.')
+        print('Credentials conf file missing "credentials" section.')
+        sys.exit()
+
+    creds.read(creds_config)
+
+    if not creds.has_option(user_config, 'address') or \
+    not creds.has_option(user_config, 'password'):
+        dlrlog.log('critical', 'No address or password credentials were found.')
+        print('No address or password credentials were found.')
+        sys.exit()
+
+    email_sender = creds['credentials']['address']
+    email_passwd = creds['credentials']['password']
 
 #
-# Loop through subreddits and download images.
+# Create output directory if it does not exist
+#
+if not os.path.isdir(output_directory):
+    os.makedirs(output_directory, exist_ok=True)
+
+#
+# Loop through subreddits and download metadata of the top posts.
 #
 for subreddit in subreddits:
-    download_dir = os.path.join(output_directory, subreddit)
-    if not os.path.isdir(download_dir):
-        os.makedirs(download_dir, exist_ok=True)
-    get_top_posts(subreddit, 'month', download_dir)
+    top_posts = get_top_posts(subreddit, timeframe)
+    if top_posts:
+        POSTS.update(top_posts)
+    else:
+        dlrlog.log('debug', 'No posts were found.')
+
+#
+# Iterate over all discovered top posts, taking hashes to help remove
+# duplictes, then save the unqiue images to disk.
+#
+for _, metadata in POSTS.items():
+    dlrlog.log('info', 'Processing: ' + metadata['title'])
+    #
+    # Use the post metadata to construct a filename.
+    #
+    filename = make_filename(metadata['url'],
+                             metadata['title'],
+                             metadata['subreddit'],
+                             output_directory)
+
+    if is_duplicate_file(filename):
+        break
+
+    #
+    # Create a hash based on the byte data of the image.
+    #
+    image = download_image(metadata['url'])
+    image_hash = calculate_hash(image)
+
+    if is_duplicate_hash(image_hash):
+        break
+
+    #
+    # Save the hash to the dictionary for comparison to subsequent posts.
+    #
+    metadata['hash'] = image_hash
+
+    #
+    # Finally, save the image to disk.
+    #
+    save_image(filename, image)
 
 #
 # If set to True, email the user that downloads are complete.
