@@ -18,6 +18,8 @@ import urllib.request
 from urllib.error import HTTPError
 from urllib.error import URLError
 
+CONFIG_DEFAULTS = {}
+CONFIG_USER = {}
 POSTS = {}
 REDDIT_URL = "https://www.reddit.com"
 
@@ -28,10 +30,9 @@ def is_url_image(url):
 
 
 def calculate_hash(image):
-    sha1 = hashlib.sha1(image)
-    hexdigest = sha1.hexdigest()
-    dlrlog.log("debug", "Calculated sha1: " + hexdigest)
-    return hexdigest
+    sha1 = hashlib.sha1(image).hexdigest()
+    dlrlog.log("debug", "Calculated sha1: " + sha1)
+    return sha1
 
 
 def is_duplicate_hash(image_hash):
@@ -113,12 +114,14 @@ def save_image(filename, data):
 def get_top_posts(subreddit, timeframe):
     #
     # Dictionary structure of subreddit posts:
+    # subreddit_posts = {
     #   postID: {
     #       url:
     #       title:
     #       subreddit:
     #       hash:
     #   }
+    # }
     #
     subreddit_posts = {}
 
@@ -134,8 +137,7 @@ def get_top_posts(subreddit, timeframe):
         req = urllib.request.Request(url)
         req.add_header(
             "User-Agent",
-            "Mozilla/4.0 (compatible; MSIE 7.0; \
-            Windows NT 6.0)",
+            "Mozilla/4.0 (compatible; MSIE 7.0; Windows NT 6.0)",
         )
         response = urllib.request.urlopen(req)
     except HTTPError as e:
@@ -183,6 +185,7 @@ def get_top_posts(subreddit, timeframe):
             subreddit_posts[pid]["hash"] = ""
         else:
             dlrlog.log("debug", "Skipping non-image: " + title)
+            break
 
     return subreddit_posts
 
@@ -271,9 +274,30 @@ conf.read(config_file)
 user_config = args.config
 
 if not conf.has_section(user_config):
+    #
+    # The specified config doesn't exist in the actual config file. Exit.
+    #
     dlrlog.log("error", 'No config section "' + user_config + '" was found.')
     print('No config section "' + user_config + '" was found.')
     sys.exit()
+
+#
+# Set configuration defaults using specified config so that these
+# defaults can be merged with the config file.
+#
+CONFIG_DEFAULTS = {
+    user_config: {
+        "send_email": "False",
+        "output_directory": os.path.join(__location__, "images"),
+        "subreddits": "pics",
+        "timeframe": "month",
+    }
+}
+CONFIG_USER = dict(conf.items(user_config))
+CONFIG = {**CONFIG_DEFAULTS, **CONFIG_USER}
+
+email_user = conf.getboolean(user_config, "send_email")
+subreddits = CONFIG["subreddits"].split(",")
 
 if conf[user_config]["send_email"] == "True":
     email_user = True
@@ -282,18 +306,6 @@ if conf[user_config]["send_email"] == "True":
     email_body = conf[user_config]["email_body"]
 else:
     email_user = False
-
-if conf.has_option(user_config, "output_directory"):
-    output_directory = conf[user_config]["output_directory"]
-else:
-    output_directory = __location__
-
-subreddits = conf[user_config]["subreddits"].split(",")
-
-if conf.has_option(user_config, "timeframe"):
-    timeframe = conf[user_config]["timeframe"]
-else:
-    timeframe = "month"
 
 #
 # Read in Gmail address and password for sending emails.

@@ -4,7 +4,7 @@
 + [About](#about)
 + [Getting Started](#getting_started)
 + [Usage](#usage)
-+ [Contributing](../CONTRIBUTING.md)
++ [TODO](#todo)
 
 ## About <a name = "about"></a>
 Downloads top image posts for defined subreddits to a directory of your choice, and optionally sends an email notification upon completion.
@@ -25,7 +25,7 @@ email_subject = New pictures downloaded!
 email_body = New top pictures have been downloaded, check them out!
 output_directory = /path/to/downloads/folder
 subreddits = AnimalsBeingBros,rarepuppers,AnimalsBeingDerps,dogswithjobs
-;timeframe = [year|month|week|day]
+;timeframe = [all|year|month|week|day]
 timeframe = month
 ```
 
@@ -53,3 +53,7 @@ password = <my password>
 * Help: `dl-reddit-top.py -h`
 * Debug: `dl-reddit-top.py -d`
 * Execute: `dl-reddit-top.py -c FunnyAnimals`
+
+## TODO <a name = "todo"></a>
+
+- [ ] Calculate sha1 in chunks to protect against potentially large images.
