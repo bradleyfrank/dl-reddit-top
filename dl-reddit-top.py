@@ -134,8 +134,7 @@ def get_top_posts(subreddit, timeframe):
     try:
         req = urllib.request.Request(url)
         req.add_header(
-            "User-Agent",
-            "Mozilla/4.0 (compatible; MSIE 7.0; Windows NT 6.0)",
+            "User-Agent", "Mozilla/4.0 (compatible; MSIE 7.0; Windows NT 6.0)"
         )
         response = urllib.request.urlopen(req)
     except HTTPError as e:
@@ -278,14 +277,18 @@ conf.read(config_file)
 
 user_config = args.config
 
+#
+# Ensure the specified config section exists. If not, exit the program.
+#
 if not conf.has_section(user_config):
-    #
-    # The specified config doesn't exist in the actual config file. Exit.
-    #
     dlrlog.log("error", 'No config section "' + user_config + '" was found.')
     print('No config section "' + user_config + '" was found.')
     sys.exit()
 
+#
+# Save the various settings, but skip checking that the options exist because
+# they were previously defined in the default settings above.
+#
 output_directory = conf[user_config]["output_directory"]
 subreddits = conf[user_config]["subreddits"].split(",")
 timeframe = conf[user_config]["timeframe"]
@@ -299,7 +302,9 @@ if conf[user_config]["send_email"] == "True":
     }
     for header in email_headers:
         if not conf.has_option(user_config, header):
-            dlrlog.log("error", 'No setting for "' + option + '" was found.')
+            dlrlog.log(
+                "critical", 'No setting for "' + option + '" was found.'
+            )
             print('No config section "' + user_config + '" was found.')
             sys.exit()
         else:
@@ -308,41 +313,43 @@ else:
     email_user = False
 
 #
-# Read in Gmail address and password for sending emails.
+# Read in Gmail credentials for sending emails. Only do this if the option
+# to send email notifications was enabled.
 #
 if email_user:
     creds = configparser.ConfigParser()
     creds_config = os.path.join(__location__, ".credentials")
 
-    #
-    # Perform checks on the credentials config to ensure settings can be read.
-    #
+    # Ensure the config file exists.
     if not os.path.exists(creds_config):
         dlrlog.log("critical", "No credentials found at " + creds_config + ".")
         print("No credentails file found; please create " + creds_config + ".")
         sys.exit()
 
+    # Ensure the "credentials" section exists.
     if not conf.has_section("credentials"):
         dlrlog.log("critical", 'No config section "credentials" was found.')
         print('Credentials conf file missing "credentials" section.')
         sys.exit()
 
+    # Read the configuration file.
     creds.read(creds_config)
 
-    if not creds.has_option(user_config, "address") or not creds.has_option(
-        user_config, "password"
-    ):
+    # Ensure the address and password exist.
+    if not creds.has_option(user_config, "address") or \
+       not creds.has_option(user_config, "password"):
         dlrlog.log(
             "critical", "No address or password credentials were found."
         )
         print("No address or password credentials were found.")
         sys.exit()
 
+    # Save the credentials.
     email_sender = creds["credentials"]["address"]
     email_passwd = creds["credentials"]["password"]
 
 #
-# Create output directory if it does not exist
+# Create output directory if it does not exist.
 #
 if not os.path.isdir(output_directory):
     os.makedirs(output_directory, exist_ok=True)
@@ -358,14 +365,17 @@ for subreddit in subreddits:
         POSTS.update(top_posts)
 
 #
-# Iterate over all discovered top posts, taking hashes to help remove
-# duplictes, then save the unqiue images to disk.
+# Iterate over all discovered top posts and perform the following operations:
+#   (1) Create a filename that includes the full path on disk
+#   (2) Check for that filename exists already
+#   (3) Get the sha1 hash of the image
+#   (4) Compare the hash to previous images to find duplicates
+#   (5) Save the image to disk
 #
 for _, metadata in POSTS.items():
     dlrlog.log("info", "Processing: " + metadata["title"])
-    #
+
     # Use the post metadata to construct a filename.
-    #
     filename = make_filename(
         metadata["url"],
         metadata["title"],
@@ -373,26 +383,22 @@ for _, metadata in POSTS.items():
         output_directory,
     )
 
+    # Skip this image if the file exists already.
     if is_duplicate_file(filename):
         continue
 
-    #
-    # Create a hash based on the byte data of the image.
-    #
+    # Get the sha1 hash of the image.
     image = download_image(metadata["url"])
     image_hash = calculate_hash(image)
 
+    # Skip this image if it matches the hash of a previous image.
     if is_duplicate_hash(image_hash):
         continue
 
-    #
     # Save the hash to the dictionary for comparison to subsequent posts.
-    #
     metadata["hash"] = image_hash
 
-    #
-    # Finally, save the image to disk.
-    #
+    # Save the image to disk.
     save_image(filename, image)
 
 #
