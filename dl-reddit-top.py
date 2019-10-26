@@ -18,8 +18,6 @@ import urllib.request
 from urllib.error import HTTPError
 from urllib.error import URLError
 
-CONFIG_DEFAULTS = {}
-CONFIG_USER = {}
 POSTS = {}
 REDDIT_URL = "https://www.reddit.com"
 
@@ -266,9 +264,16 @@ if not os.path.exists(config_file):
     sys.exit()
 
 #
-# Read and apply settings from the config file.
+# Setup ConfigParser to read the user's config file. Begin with setting some
+# default values in case they aren't defined in the config.
 #
-conf = configparser.ConfigParser()
+config_defaults = {
+    "send_email": "False",
+    "output_directory": os.path.join(__location__, "images"),
+    "subreddits": "pics",
+    "timeframe": "month",
+}
+conf = configparser.ConfigParser(defaults=config_defaults)
 conf.read(config_file)
 
 user_config = args.config
@@ -281,29 +286,24 @@ if not conf.has_section(user_config):
     print('No config section "' + user_config + '" was found.')
     sys.exit()
 
-#
-# Set configuration defaults using specified config so that these
-# defaults can be merged with the config file.
-#
-CONFIG_DEFAULTS = {
-    user_config: {
-        "send_email": "False",
-        "output_directory": os.path.join(__location__, "images"),
-        "subreddits": "pics",
-        "timeframe": "month",
-    }
-}
-CONFIG_USER = dict(conf.items(user_config))
-CONFIG = {**CONFIG_DEFAULTS, **CONFIG_USER}
-
-email_user = conf.getboolean(user_config, "send_email")
-subreddits = CONFIG["subreddits"].split(",")
+output_directory = conf[user_config]["output_directory"]
+subreddits = conf[user_config]["subreddits"].split(",")
+timeframe = conf[user_config]["timeframe"]
 
 if conf[user_config]["send_email"] == "True":
     email_user = True
-    email_receiver = conf[user_config]["email_address"]
-    email_subject = conf[user_config]["email_subject"]
-    email_body = conf[user_config]["email_body"]
+    email_headers = {
+        "email_address": "",
+        "email_subject": "",
+        "email_body": "",
+    }
+    for header in email_headers:
+        if not conf.has_option(user_config, header):
+            dlrlog.log("error", 'No setting for "' + option + '" was found.')
+            print('No config section "' + user_config + '" was found.')
+            sys.exit()
+        else:
+            email_headers[header] = conf[user_config][header]
 else:
     email_user = False
 
@@ -352,10 +352,10 @@ if not os.path.isdir(output_directory):
 #
 for subreddit in subreddits:
     top_posts = get_top_posts(subreddit, timeframe)
-    if top_posts:
-        POSTS.update(top_posts)
-    else:
+    if top_posts is False:
         dlrlog.log("debug", "No posts were found.")
+    else:
+        POSTS.update(top_posts)
 
 #
 # Iterate over all discovered top posts, taking hashes to help remove
@@ -374,7 +374,7 @@ for _, metadata in POSTS.items():
     )
 
     if is_duplicate_file(filename):
-        break
+        continue
 
     #
     # Create a hash based on the byte data of the image.
@@ -383,7 +383,7 @@ for _, metadata in POSTS.items():
     image_hash = calculate_hash(image)
 
     if is_duplicate_hash(image_hash):
-        break
+        continue
 
     #
     # Save the hash to the dictionary for comparison to subsequent posts.
