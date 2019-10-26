@@ -9,7 +9,7 @@
 ## About <a name = "about"></a>
 Downloads top image posts for defined subreddits to a directory of your choice, and optionally sends an email notification upon completion.
 
-For emailing notifications, it's tested with Gmail credentials.
+For emailing notifications, currently Gmail accounts are supported.
 
 ## Getting Started <a name = "getting_started"></a>
 
