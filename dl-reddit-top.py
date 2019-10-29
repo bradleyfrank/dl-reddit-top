@@ -15,6 +15,7 @@ import shutil
 import smtplib
 import sys
 import urllib.request
+import uuid
 from urllib.error import HTTPError
 from urllib.error import URLError
 
@@ -28,10 +29,9 @@ def is_url_image(url):
 
 
 def calculate_hash(image):
-    sha1 = hashlib.sha1(image)
-    hexdigest = sha1.hexdigest()
-    dlrlog.log("debug", "Calculated sha1: " + hexdigest)
-    return hexdigest
+    sha1 = hashlib.sha1(image).hexdigest()
+    dlrlog.log("debug", "Calculated sha1: " + sha1)
+    return sha1
 
 
 def is_duplicate_hash(image_hash):
@@ -62,11 +62,14 @@ def make_filename(url, name, subreddit, out_dir):
 
     #
     # Remove spaces, special characters, etc. Then truncate filename to 50
-    # characters if too long.
+    # characters if too long. If the name ends up being blank, create a
+    # random string instead (can happen with emoji-only titles).
     #
     name = re.sub(r"[^\w\s]", "", name)
     name = re.sub(r"\s+", "-", name)
     name = name[:50] if len(name) > 50 else name
+    if name == "":
+        name = str(uuid.uuid4().hex)
     dlrlog.log("debug", "Sanitized name: " + name)
 
     #
@@ -113,12 +116,14 @@ def save_image(filename, data):
 def get_top_posts(subreddit, timeframe):
     #
     # Dictionary structure of subreddit posts:
+    # subreddit_posts = {
     #   postID: {
     #       url:
     #       title:
     #       subreddit:
     #       hash:
     #   }
+    # }
     #
     subreddit_posts = {}
 
@@ -133,9 +138,7 @@ def get_top_posts(subreddit, timeframe):
     try:
         req = urllib.request.Request(url)
         req.add_header(
-            "User-Agent",
-            "Mozilla/4.0 (compatible; MSIE 7.0; \
-            Windows NT 6.0)",
+            "User-Agent", "Mozilla/4.0 (compatible; MSIE 7.0; Windows NT 6.0)"
         )
         response = urllib.request.urlopen(req)
     except HTTPError as e:
@@ -183,6 +186,7 @@ def get_top_posts(subreddit, timeframe):
             subreddit_posts[pid]["hash"] = ""
         else:
             dlrlog.log("debug", "Skipping non-image: " + title)
+            break
 
     return subreddit_posts
 
@@ -263,74 +267,93 @@ if not os.path.exists(config_file):
     sys.exit()
 
 #
-# Read and apply settings from the config file.
+# Setup ConfigParser to read the user's config file. Begin with setting some
+# default values in case they aren't defined in the config.
 #
-conf = configparser.ConfigParser()
+config_defaults = {
+    "send_email": "False",
+    "output_directory": os.path.join(__location__, "images"),
+    "subreddits": "pics",
+    "timeframe": "month",
+}
+conf = configparser.ConfigParser(defaults=config_defaults)
 conf.read(config_file)
 
 user_config = args.config
 
+#
+# Ensure the specified config section exists. If not, exit the program.
+#
 if not conf.has_section(user_config):
     dlrlog.log("error", 'No config section "' + user_config + '" was found.')
     print('No config section "' + user_config + '" was found.')
     sys.exit()
 
+#
+# Save the various settings, but skip checking that the options exist because
+# they were previously defined in the default settings above.
+#
+output_directory = conf[user_config]["output_directory"]
+subreddits = conf[user_config]["subreddits"].split(",")
+timeframe = conf[user_config]["timeframe"]
+
 if conf[user_config]["send_email"] == "True":
     email_user = True
-    email_receiver = conf[user_config]["email_address"]
-    email_subject = conf[user_config]["email_subject"]
-    email_body = conf[user_config]["email_body"]
+    email_headers = {
+        "email_address": "",
+        "email_subject": "",
+        "email_body": "",
+    }
+    for header in email_headers:
+        if not conf.has_option(user_config, header):
+            dlrlog.log(
+                "critical", 'No setting for "' + option + '" was found.'
+            )
+            print('No config section "' + user_config + '" was found.')
+            sys.exit()
+        else:
+            email_headers[header] = conf[user_config][header]
 else:
     email_user = False
 
-if conf.has_option(user_config, "output_directory"):
-    output_directory = conf[user_config]["output_directory"]
-else:
-    output_directory = __location__
-
-subreddits = conf[user_config]["subreddits"].split(",")
-
-if conf.has_option(user_config, "timeframe"):
-    timeframe = conf[user_config]["timeframe"]
-else:
-    timeframe = "month"
-
 #
-# Read in Gmail address and password for sending emails.
+# Read in Gmail credentials for sending emails. Only do this if the option
+# to send email notifications was enabled.
 #
 if email_user:
     creds = configparser.ConfigParser()
     creds_config = os.path.join(__location__, ".credentials")
 
-    #
-    # Perform checks on the credentials config to ensure settings can be read.
-    #
+    # Ensure the config file exists.
     if not os.path.exists(creds_config):
         dlrlog.log("critical", "No credentials found at " + creds_config + ".")
         print("No credentails file found; please create " + creds_config + ".")
         sys.exit()
 
-    if not conf.has_section("credentials"):
+    # Read the configuration file.
+    creds.read(creds_config)
+
+    # Ensure the "credentials" section exists.
+    if not creds.has_section("credentials"):
         dlrlog.log("critical", 'No config section "credentials" was found.')
         print('Credentials conf file missing "credentials" section.')
         sys.exit()
 
-    creds.read(creds_config)
-
-    if not creds.has_option(user_config, "address") or not creds.has_option(
-        user_config, "password"
-    ):
+    # Ensure the address and password exist.
+    if not creds.has_option('credentials', "address") or \
+       not creds.has_option('credentials', "password"):
         dlrlog.log(
             "critical", "No address or password credentials were found."
         )
         print("No address or password credentials were found.")
         sys.exit()
 
+    # Save the credentials.
     email_sender = creds["credentials"]["address"]
     email_passwd = creds["credentials"]["password"]
 
 #
-# Create output directory if it does not exist
+# Create output directory if it does not exist.
 #
 if not os.path.isdir(output_directory):
     os.makedirs(output_directory, exist_ok=True)
@@ -340,20 +363,23 @@ if not os.path.isdir(output_directory):
 #
 for subreddit in subreddits:
     top_posts = get_top_posts(subreddit, timeframe)
-    if top_posts:
-        POSTS.update(top_posts)
-    else:
+    if top_posts is False:
         dlrlog.log("debug", "No posts were found.")
+    else:
+        POSTS.update(top_posts)
 
 #
-# Iterate over all discovered top posts, taking hashes to help remove
-# duplictes, then save the unqiue images to disk.
+# Iterate over all discovered top posts and perform the following operations:
+#   (1) Create a filename that includes the full path on disk
+#   (2) Check for that filename exists already
+#   (3) Get the sha1 hash of the image
+#   (4) Compare the hash to previous images to find duplicates
+#   (5) Save the image to disk
 #
 for _, metadata in POSTS.items():
     dlrlog.log("info", "Processing: " + metadata["title"])
-    #
+
     # Use the post metadata to construct a filename.
-    #
     filename = make_filename(
         metadata["url"],
         metadata["title"],
@@ -361,26 +387,22 @@ for _, metadata in POSTS.items():
         output_directory,
     )
 
+    # Skip this image if the file exists already.
     if is_duplicate_file(filename):
-        break
+        continue
 
-    #
-    # Create a hash based on the byte data of the image.
-    #
+    # Get the sha1 hash of the image.
     image = download_image(metadata["url"])
     image_hash = calculate_hash(image)
 
+    # Skip this image if it matches the hash of a previous image.
     if is_duplicate_hash(image_hash):
-        break
+        continue
 
-    #
     # Save the hash to the dictionary for comparison to subsequent posts.
-    #
     metadata["hash"] = image_hash
 
-    #
-    # Finally, save the image to disk.
-    #
+    # Save the image to disk.
     save_image(filename, image)
 
 #
@@ -388,5 +410,9 @@ for _, metadata in POSTS.items():
 #
 if email_user:
     send_email(
-        email_sender, email_receiver, email_subject, email_body, email_passwd
+        email_sender,
+        email_headers['email_address'],
+        email_headers['email_subject'],
+        email_headers['email_body'],
+        email_passwd
     )
