@@ -15,6 +15,7 @@ import shutil
 import smtplib
 import sys
 import urllib.request
+import uuid
 from urllib.error import HTTPError
 from urllib.error import URLError
 
@@ -61,11 +62,14 @@ def make_filename(url, name, subreddit, out_dir):
 
     #
     # Remove spaces, special characters, etc. Then truncate filename to 50
-    # characters if too long.
+    # characters if too long. If the name ends up being blank, create a
+    # random string instead (can happen with emoji-only titles).
     #
     name = re.sub(r"[^\w\s]", "", name)
     name = re.sub(r"\s+", "-", name)
     name = name[:50] if len(name) > 50 else name
+    if name == "":
+        name = str(uuid.uuid4().hex)
     dlrlog.log("debug", "Sanitized name: " + name)
 
     #
