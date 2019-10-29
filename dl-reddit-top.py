@@ -330,18 +330,18 @@ if email_user:
         print("No credentails file found; please create " + creds_config + ".")
         sys.exit()
 
+    # Read the configuration file.
+    creds.read(creds_config)
+
     # Ensure the "credentials" section exists.
-    if not conf.has_section("credentials"):
+    if not creds.has_section("credentials"):
         dlrlog.log("critical", 'No config section "credentials" was found.')
         print('Credentials conf file missing "credentials" section.')
         sys.exit()
 
-    # Read the configuration file.
-    creds.read(creds_config)
-
     # Ensure the address and password exist.
-    if not creds.has_option(user_config, "address") or \
-       not creds.has_option(user_config, "password"):
+    if not creds.has_option('credentials', "address") or \
+       not creds.has_option('credentials', "password"):
         dlrlog.log(
             "critical", "No address or password credentials were found."
         )
@@ -410,5 +410,9 @@ for _, metadata in POSTS.items():
 #
 if email_user:
     send_email(
-        email_sender, email_receiver, email_subject, email_body, email_passwd
+        email_sender,
+        email_headers['email_address'],
+        email_headers['email_subject'],
+        email_headers['email_body'],
+        email_passwd
     )
